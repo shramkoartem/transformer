@@ -1,15 +1,13 @@
-import math
-import copy
-from abc import ABC, abstractmethod
-from typing import List, Tuple
-
+# %%
 import torch
 from torch import nn
 from torch import Tensor
 import torch.functional as F
+from typing import List, Tuple
+import math
+import copy
 
-
-
+# %%
 class Transformer(nn.Module):
     """
     Encoder-Decoder architecture
@@ -41,26 +39,38 @@ class Transformer(nn.Module):
         returns:
             - outputs: (Tensor) logits of next book
         """
-        memory = self.encoder(inputs)
-        hidden_state = self.decoder(inputs, memory)
-        outputs = self.generator(hidden_state)
+        memory = self.encode(inputs)
+        hidden_state = self.decode(inputs, memory)
+        outputs = self.generator(hidden_state[:,0,:])
         return outputs
     
     def encode(self, inputs: Tensor) -> Tensor:
         """
+        Run inputs through the encoder layer
+        args:
+            - inputs: (Tensor) book ids
+        returns:
+            - outptus: (Tensor) encoder embeddings
         """
         embeddings = self.input_embedder(inputs)
         embeddings = self.encoder(embeddings)
         return embeddings
 
-    def decode(self, inputs: Tensor) -> Tensor:
+    def decode(self, inputs: Tensor, memory: Tensor) -> Tensor:
         """
+        Run inputs through the decoder layer
+        args:
+            - inputs: (Tensor) book ids
+            - memory: (Tensor) encoder embeddings
+        returns:
+            - outptus: (Tensor) decoder embeddings
         """
         embeddings = self.output_embedder(inputs)
-        embeddings = self.decoder(embeddings)
+        embeddings = self.decoder(embeddings, memory)
         return embeddings
 
-      
+
+# %%
 class Encoder(nn.Module):
     """
     Generates vector embeddings of supplied 
@@ -91,8 +101,9 @@ class Encoder(nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
-      
-    class EncoderLayer(nn.Module):
+
+# %%
+class EncoderLayer(nn.Module):
     """
     Consists of two sub layers:
     - Multi-head self attention
@@ -127,6 +138,10 @@ class Encoder(nn.Module):
         x = self.layer_norm(x + sub_x)
         return x
 
+
+
+# %%
+from abc import ABC, abstractmethod
 
 class Attention(ABC):
 
@@ -248,7 +263,8 @@ class MultiHeadMixedAttention(nn.Module):
         x = self.dense(self.drop(x))
         return x
 
-      
+
+# %%
 class FeedForwardNetwork(nn.Module):
     """
     """
@@ -266,7 +282,8 @@ class FeedForwardNetwork(nn.Module):
         x = self.drop(x)
         x = self.out(x)
         return x
-      
+
+# %%
 class LayerNorm(nn.Module):
     """
     Layer normalization
@@ -278,13 +295,14 @@ class LayerNorm(nn.Module):
         self.eps = eps
         self.gamma = nn.Parameter(torch.ones(shape))
         self.beta = nn.Parameter(torch.zeros(shape))
-
+    
     def forward(self, x: Tensor) -> Tensor:
         mean = x.mean(dim=-1, keepdim=True)
         var = x.var(dim=-1, keepdim=True)
         y = self.gamma*(x-mean)/(var+self.eps) + self.beta
         return y
 
+# %%
 class Decoder(nn.Module):
     """
     Stack of decoder layers
@@ -296,12 +314,13 @@ class Decoder(nn.Module):
             copy.deepcopy(layer) for _ in range(n_layers)
         ])
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, memory: Tensor) -> Tensor:
         for layer in self.layers:
-            x = layer(x)
+            x = layer(x, memory)
 
         return x
-      
+
+# %%
 class DecoderLayer(nn.Module):
     """
     Mixed QKV multi head attention
@@ -341,17 +360,115 @@ class DecoderLayer(nn.Module):
         sub_x = self.ffn_layer(x)
         x = self.layer_norm(x + sub_x)
         return x
-      
-      
-encoder = Encoder(
+    
+
+# %%
+class Generator(nn.Module):
+    """
+    """
+    def __init__(self, dim_embeddings: int, dim_output: int):
+        super().__init__()
+
+        self.dense = nn.Linear(dim_embeddings, dim_embeddings)
+        self.out = nn.Linear(dim_embeddings, dim_output)
+        self.drop = nn.Dropout(p=0.1)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        args:
+            x: Tensor BxI - last hidden state of sequence embeddings
+        returns:
+            x: BxO - probabilities of next items in sequence
+        """
+        x = self.dense(x).relu()
+        x = self.drop(x)
+        x = self.out(x)
+        return x.softmax(dim=-1)
+
+
+# %%
+class Tokenizer:
+    """
+    Pads sequence length with zeros
+    """
+    def __init__(self, n_sequence: int):
+        self.n_sequence = n_sequence
+    
+    def __call__(self, x: Tensor) -> Tensor:
+        """
+        args:
+            - x: (LongTensor) BxSx
+                    where Y <= S
+        returns:
+            - padded x: (Tensor) BxS
+        """
+        b, s = x.size()
+        pad = torch.zeros((b, self.n_sequence-s-1), dtype=torch.long)
+        cls_token = self.get_special_token()
+        x = torch.concat([
+            cls_token.reshape(1,1).repeat(b,1),
+            x,
+            pad], dim=1)
+        return x
+
+    def get_special_token(self):
+        """
+        [CLS] token: 101
+        """
+        return torch.LongTensor([101])
+
+# %%
+def make_model(
+        src_vocab_size,
+        tgt_vocab_size,
+        n_layers=6,
+        dim_model=512,
+        dim_ffnet=2048,
+        h=8
+    ):
+    encoder = Encoder(
     EncoderLayer(
         attention_layer=MultiHeadSelfAttention(
-            SelfAttention(dim_x=512, dim_h=64),
-            dim_x=512,
-            h=8
+            SelfAttention(dim_x=dim_model, dim_h=dim_model//h),
+            dim_x=dim_model,
+            h=h
         ),
-        ffn_layer=FeedForwardNetwork(512, 512),
-        layer_norm=LayerNorm(shape=(512, 512))
-    ), n_layers=3
-)
-    
+        ffn_layer=FeedForwardNetwork(dim_x=dim_model, dim_h=dim_ffnet),
+        layer_norm=LayerNorm(shape=(dim_model, dim_model))
+    ), n_layers=n_layers
+    )
+
+    decoder = Decoder(
+        DecoderLayer(
+            self_attention=MultiHeadSelfAttention(
+                SelfAttention(dim_x=dim_model, dim_h=dim_model//h),
+                dim_x=dim_model,
+                h=h
+            ),
+            mixed_attention=MultiHeadMixedAttention(
+                MixedAttention(dim_x=dim_model, dim_h=dim_model//h),
+                dim_x=dim_model,
+                h=h
+            ),
+            ffn_layer=FeedForwardNetwork(dim_x=dim_model, dim_h=dim_ffnet),
+            layer_norm=LayerNorm(shape=(dim_model, dim_model))
+        ), n_layers=n_layers
+    )
+
+    generator = Generator(dim_embeddings=dim_model, dim_output=tgt_vocab_size)
+
+    model = Transformer(
+        encoder,
+        decoder,
+        generator,
+        num_embeddings=src_vocab_size,
+        hidden_dim=dim_model
+    )
+
+    for p in model.parameters():
+        if p.dim() > 1:
+            nn.init.xavier_uniform_(p)
+
+    return model
+
+
