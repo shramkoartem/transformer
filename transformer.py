@@ -35,9 +35,9 @@ class Transformer(nn.Module):
     def forward(self, inputs: Tensor) -> Tensor:
         """
         args:
-            - inputs: (Tensor) book ids
+            - inputs: (Tensor) token ids
         returns:
-            - outputs: (Tensor) logits of next book
+            - outputs: (Tensor) logits of next tokens
         """
         memory = self.encode(inputs)
         hidden_state = self.decode(inputs, memory)
@@ -48,7 +48,7 @@ class Transformer(nn.Module):
         """
         Run inputs through the encoder layer
         args:
-            - inputs: (Tensor) book ids
+            - inputs: (Tensor) token ids
         returns:
             - outptus: (Tensor) encoder embeddings
         """
@@ -60,7 +60,7 @@ class Transformer(nn.Module):
         """
         Run inputs through the decoder layer
         args:
-            - inputs: (Tensor) book ids
+            - inputs: (Tensor) token ids
             - memory: (Tensor) encoder embeddings
         returns:
             - outptus: (Tensor) decoder embeddings
@@ -73,8 +73,7 @@ class Transformer(nn.Module):
 # %%
 class Encoder(nn.Module):
     """
-    Generates vector embeddings of supplied 
-    books in readers context
+    Generates vector embeddings of supplied tokens
     """
     def __init__(
             self,
@@ -267,6 +266,7 @@ class MultiHeadMixedAttention(nn.Module):
 # %%
 class FeedForwardNetwork(nn.Module):
     """
+    Fully connected two layer net
     """
     def __init__(self, dim_x: int, dim_h: int):
         super().__init__()
@@ -277,6 +277,10 @@ class FeedForwardNetwork(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         """
+        args:
+            - x: (Tensor) BxSxE
+        returns:
+            - x: (Tensor) BxSxE
         """
         x = self.dense(x).relu()
         x = self.drop(x)
