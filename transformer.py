@@ -35,9 +35,9 @@ class Transformer(nn.Module):
     def forward(self, inputs: Tensor) -> Tensor:
         """
         args:
-            - inputs: (Tensor) token ids
+            - inputs: (Tensor) book ids
         returns:
-            - outputs: (Tensor) logits of next tokens
+            - outputs: (Tensor) logits of next book
         """
         memory = self.encode(inputs)
         hidden_state = self.decode(inputs, memory)
@@ -48,7 +48,7 @@ class Transformer(nn.Module):
         """
         Run inputs through the encoder layer
         args:
-            - inputs: (Tensor) token ids
+            - inputs: (Tensor) book ids
         returns:
             - outptus: (Tensor) encoder embeddings
         """
@@ -60,7 +60,7 @@ class Transformer(nn.Module):
         """
         Run inputs through the decoder layer
         args:
-            - inputs: (Tensor) token ids
+            - inputs: (Tensor) book ids
             - memory: (Tensor) encoder embeddings
         returns:
             - outptus: (Tensor) decoder embeddings
@@ -73,7 +73,8 @@ class Transformer(nn.Module):
 # %%
 class Encoder(nn.Module):
     """
-    Generates vector embeddings of supplied tokens
+    Generates vector embeddings of supplied 
+    books in readers context
     """
     def __init__(
             self,
@@ -266,7 +267,6 @@ class MultiHeadMixedAttention(nn.Module):
 # %%
 class FeedForwardNetwork(nn.Module):
     """
-    Fully connected two layer net
     """
     def __init__(self, dim_x: int, dim_h: int):
         super().__init__()
@@ -277,10 +277,6 @@ class FeedForwardNetwork(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         """
-        args:
-            - x: (Tensor) BxSxE
-        returns:
-            - x: (Tensor) BxSxE
         """
         x = self.dense(x).relu()
         x = self.drop(x)
@@ -397,8 +393,9 @@ class Tokenizer:
     """
     def __init__(self, n_sequence: int):
         self.n_sequence = n_sequence
-    
-    def __call__(self, x: Tensor) -> Tensor:
+        self.CLS = torch.LongTensor([101])
+
+    def __call__(self, x: Tensor, batch: bool = False) -> Tensor:
         """
         args:
             - x: (LongTensor) BxSx
@@ -406,20 +403,32 @@ class Tokenizer:
         returns:
             - padded x: (Tensor) BxS
         """
-        b, s = x.size()
-        pad = torch.zeros((b, self.n_sequence-s-1), dtype=torch.long)
+        if batch:
+            b, s = x.size()
+            y = self.n_sequence-s-1
+            size = (b, y)
+            dim = 1
+            cls_token = self.CLS.reshape(1,1).repeat(b,1)
+        else:
+            s = x.size()[0]
+            size = self.n_sequence-s-1
+            cls_token = self.CLS
+            dim = 0
+
+        pad = torch.zeros(size, dtype=torch.long)
         cls_token = self.get_special_token()
         x = torch.concat([
-            cls_token.reshape(1,1).repeat(b,1),
+            cls_token,
             x,
-            pad], dim=1)
+            pad], dim=dim)
         return x
 
     def get_special_token(self):
         """
         [CLS] token: 101
         """
-        return torch.LongTensor([101])
+        return self.CLS
+
 
 # %%
 def make_model(
